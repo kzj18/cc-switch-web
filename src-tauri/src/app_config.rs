@@ -930,6 +930,7 @@ mod tests {
         dir: TempDir,
         original_home: Option<String>,
         original_userprofile: Option<String>,
+        original_account_home: Option<String>,
     }
 
     impl TempHome {
@@ -937,9 +938,11 @@ mod tests {
             let dir = TempDir::new().expect("failed to create temp home");
             let original_home = env::var("HOME").ok();
             let original_userprofile = env::var("USERPROFILE").ok();
+            let original_account_home = env::var("CC_SWITCH_ACCOUNT_HOME").ok();
 
             env::set_var("HOME", dir.path());
             env::set_var("USERPROFILE", dir.path());
+            env::set_var("CC_SWITCH_ACCOUNT_HOME", dir.path());
             // 重置依赖 HOME/USERPROFILE 的缓存，避免跨平台测试读取旧目录
             #[cfg(feature = "desktop")]
             crate::app_store::set_app_config_dir_override_standalone(None)
@@ -950,6 +953,7 @@ mod tests {
                 dir,
                 original_home,
                 original_userprofile,
+                original_account_home,
             }
         }
     }
@@ -964,6 +968,10 @@ mod tests {
             match &self.original_userprofile {
                 Some(value) => env::set_var("USERPROFILE", value),
                 None => env::remove_var("USERPROFILE"),
+            }
+            match &self.original_account_home {
+                Some(value) => env::set_var("CC_SWITCH_ACCOUNT_HOME", value),
+                None => env::remove_var("CC_SWITCH_ACCOUNT_HOME"),
             }
         }
     }

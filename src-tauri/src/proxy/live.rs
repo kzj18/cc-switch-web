@@ -117,6 +117,11 @@ pub fn apply_takeover(
     provider: &Provider,
     listen_url: &str,
 ) -> Result<(), AppError> {
+    if matches!(app, AppType::Opencode) && crate::opencode_config::uses_native_config()? {
+        return Err(AppError::Config(
+            "原生 OpenCode v2 请使用直连供应商；当前本地路由写入器仅支持 v1，未修改配置".into(),
+        ));
+    }
     let mut backups = load_backups()?;
     match app {
         AppType::Claude => {

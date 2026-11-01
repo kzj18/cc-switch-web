@@ -20,6 +20,7 @@ mod gemini_mcp;
 mod init_status;
 #[path = "proxy/json_canonical.rs"]
 pub(crate) mod json_canonical;
+mod jsonc_document;
 #[cfg(any(feature = "web-server", feature = "desktop"))]
 pub mod local_proxy;
 mod mcp;
@@ -70,8 +71,8 @@ pub use openclaw_config::{
 };
 pub use prompt::Prompt;
 pub use provider::{
-    ClaudeDesktopMode, ClaudeDesktopModelRoute, Provider, ProviderAuthBinding, ProviderMeta,
-    ProviderType, UniversalProvider,
+    ClaudeDesktopMode, ClaudeDesktopModelRoute, OpenCodeConfigFormat, Provider,
+    ProviderAuthBinding, ProviderMeta, ProviderType, UniversalProvider,
 };
 pub use services::{
     AuthService, CodexOAuthManager, ConfigService, CopilotAuthManager, EndpointLatency, McpService,

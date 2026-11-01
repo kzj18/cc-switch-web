@@ -152,7 +152,7 @@ export function AddProviderDialog({
             addUrl(env.GOOGLE_GEMINI_BASE_URL);
           }
         } else if (appId === "opencode") {
-          const options = parsedConfig.options as
+          const options = (parsedConfig.settings ?? parsedConfig.options) as
             | Record<string, any>
             | undefined;
           if (options?.baseURL) {

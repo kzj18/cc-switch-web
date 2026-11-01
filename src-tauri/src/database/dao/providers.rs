@@ -102,6 +102,7 @@ impl Database {
                         || m.github_account_id.is_some()
                         || m.auth_binding.is_some()
                         || m.live_config_managed.is_some()
+                        || m.opencode_config_format.is_some()
                 }),
             };
 

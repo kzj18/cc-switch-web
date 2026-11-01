@@ -74,6 +74,7 @@ import { OmoFormFields } from "./OmoFormFields";
 import { ModelDropdown } from "./shared";
 import {
   OPENCODE_DEFAULT_CONFIG,
+  isNativeOpencodeConfig,
   parseOpencodeConfig,
 } from "./helpers/opencodeFormUtils";
 import { parseOmoOtherFieldsObject } from "@/types/omo";
@@ -642,6 +643,17 @@ export function ProviderForm({
     useState<ProviderFormData | null>(null);
   const [isConfirmSubmitting, setIsConfirmSubmitting] = useState(false);
   const settingsConfigValue = form.watch("settingsConfig");
+  const nativeOpencode = useMemo(() => {
+    if (appId !== "opencode") return false;
+    try {
+      return isNativeOpencodeConfig(
+        JSON.parse(settingsConfigValue),
+        initialData?.meta?.opencodeConfigFormat,
+      );
+    } catch {
+      return initialData?.meta?.opencodeConfigFormat === "v2";
+    }
+  }, [appId, settingsConfigValue, initialData?.meta?.opencodeConfigFormat]);
 
   // 使用 API Key hook
   const {
@@ -1384,6 +1396,14 @@ export function ProviderForm({
     const authMeta = buildAuthBindingMeta(payload.meta ?? initialData?.meta);
     if (authMeta) {
       payload.meta = authMeta;
+    }
+
+    if (appId === "opencode") {
+      payload.meta = {
+        ...(initialData?.meta ?? {}),
+        ...(payload.meta ?? {}),
+        opencodeConfigFormat: nativeOpencode ? "v2" : "v1",
+      };
     }
 
     await onSubmit(payload);
@@ -2212,7 +2232,7 @@ export function ProviderForm({
         )}
 
         {/* OpenCode 专属字段 */}
-        {appId === "opencode" && (
+        {appId === "opencode" && !nativeOpencode && (
           <OpenCodeFormFields
             npm={opencodeState.npm}
             onNpmChange={opencodeState.handleNpmChange}

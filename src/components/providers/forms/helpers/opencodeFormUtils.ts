@@ -1,5 +1,21 @@
 import type { OpenCodeModel, OpenCodeProviderConfig } from "@/types";
 
+export function isNativeOpencodeConfig(
+  config: unknown,
+  source?: "v1" | "v2",
+): boolean {
+  if (source) return source === "v2";
+  if (!config || typeof config !== "object" || Array.isArray(config))
+    return false;
+  const value = config as Record<string, unknown>;
+  return (
+    !["npm", "options", "api"].some((key) => key in value) &&
+    ["package", "settings", "headers", "body", "canonical"].some(
+      (key) => key in value,
+    )
+  );
+}
+
 export const OPENCODE_DEFAULT_NPM = "@ai-sdk/openai-compatible";
 
 export const OPENCODE_DEFAULT_CONFIG = JSON.stringify(

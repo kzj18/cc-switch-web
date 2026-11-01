@@ -50,6 +50,39 @@ describe("EditProviderDialog", () => {
     tMock.mockImplementation((key: string) => key);
   });
 
+  it("prefers a native provider over a legacy declaration with the same ID", async () => {
+    providersApiMock.getCurrent.mockResolvedValue("native");
+    const native = {
+      package: "aisdk:@ai-sdk/openai-compatible",
+      settings: { apiKey: "synthetic" },
+      models: {},
+      extension: { keep: true },
+    };
+    vscodeApiMock.getLiveProviderSettings.mockResolvedValue({
+      providers: { native },
+      provider: { native: { npm: "legacy" } },
+    });
+    render(
+      <EditProviderDialog
+        open
+        appId="opencode"
+        provider={{
+          id: "native",
+          name: "Native",
+          settingsConfig: {},
+          meta: { opencodeConfigFormat: "v2" },
+        }}
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        providerFormMock.mock.calls.at(-1)?.[0]?.initialData?.settingsConfig,
+      ).toEqual(native),
+    );
+  });
+
   it("uses provider snapshot for opencode when live provider fragment is missing", async () => {
     providersApiMock.getCurrent.mockResolvedValue("open-current");
     vscodeApiMock.getLiveProviderSettings.mockResolvedValue({

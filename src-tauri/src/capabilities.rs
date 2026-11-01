@@ -36,6 +36,9 @@ pub struct FeatureCapabilities {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppCapabilities {
+    /// Native configuration formats supported by the scoped writers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_versions: Option<Vec<u8>>,
     pub providers: bool,
     pub prompts: bool,
     pub mcp: bool,
@@ -142,6 +145,7 @@ fn app_capabilities(host_managed: bool) -> BTreeMap<&'static str, AppCapabilitie
     apps.insert(
         "claude-desktop",
         AppCapabilities {
+            config_versions: None,
             providers: true,
             prompts: false,
             mcp: false,
@@ -158,6 +162,7 @@ fn app_capabilities(host_managed: bool) -> BTreeMap<&'static str, AppCapabilitie
     apps.insert(
         "opencode",
         AppCapabilities {
+            config_versions: Some(vec![1, 2]),
             additive_provider_mode: true,
             ..full_switch_app(host_managed, true, true)
         },
@@ -165,6 +170,7 @@ fn app_capabilities(host_managed: bool) -> BTreeMap<&'static str, AppCapabilitie
     apps.insert(
         "openclaw",
         AppCapabilities {
+            config_versions: None,
             providers: true,
             prompts: false,
             mcp: false,
@@ -180,6 +186,7 @@ fn app_capabilities(host_managed: bool) -> BTreeMap<&'static str, AppCapabilitie
         apps.insert(
             app,
             AppCapabilities {
+                config_versions: None,
                 providers: true,
                 prompts: false,
                 mcp: true,
@@ -197,6 +204,7 @@ fn app_capabilities(host_managed: bool) -> BTreeMap<&'static str, AppCapabilitie
 
 fn full_switch_app(host_managed: bool, local_routing: bool, sessions: bool) -> AppCapabilities {
     AppCapabilities {
+        config_versions: None,
         providers: true,
         prompts: true,
         mcp: true,

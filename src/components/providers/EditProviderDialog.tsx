@@ -76,6 +76,18 @@ export function EditProviderDialog({
 
   const initialSettingsConfig = useMemo(() => {
     if (appId === "opencode" && liveSettings && provider) {
+      const nativeMap = liveSettings.providers as
+        | Record<string, unknown>
+        | undefined;
+      const native = nativeMap?.[provider.id];
+      if (
+        provider.meta?.opencodeConfigFormat !== "v1" &&
+        native &&
+        typeof native === "object" &&
+        !Array.isArray(native)
+      ) {
+        return native as Record<string, unknown>;
+      }
       const providerMap = liveSettings.provider;
       if (providerMap && typeof providerMap === "object") {
         const currentSettings = (providerMap as Record<string, unknown>)[

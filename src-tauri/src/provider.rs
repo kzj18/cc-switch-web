@@ -252,9 +252,22 @@ pub struct ProviderAuthBinding {
     pub use_default: Option<bool>,
 }
 
+/// Format of an OpenCode provider declaration, including empty built-in overrides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenCodeConfigFormat {
+    V1,
+    V2,
+}
+
 /// 供应商元数据
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderMeta {
+    #[serde(
+        rename = "opencodeConfigFormat",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub opencode_config_format: Option<OpenCodeConfigFormat>,
     /// 自定义端点列表（按 URL 去重存储）
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub custom_endpoints: HashMap<String, crate::settings::CustomEndpoint>,

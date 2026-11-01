@@ -403,6 +403,28 @@ beforeEach(() => {
 });
 
 describe("ProviderForm", () => {
+  it("edits native OpenCode JSON without introducing legacy fields and retains empty override format", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <ProviderForm
+        {...defaultProps}
+        appId="opencode"
+        providerId="builtin"
+        onSubmit={onSubmit}
+        initialData={{
+          name: "Builtin",
+          settingsConfig: {},
+          meta: { opencodeConfigFormat: "v2" },
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("opencode-fields")).not.toBeInTheDocument();
+    expect(screen.getByTestId("config-textarea")).toHaveValue("{}");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(JSON.parse(onSubmit.mock.calls[0][0].settingsConfig)).toEqual({});
+    expect(onSubmit.mock.calls[0][0].meta.opencodeConfigFormat).toBe("v2");
+  });
   it("renders form with basic fields", () => {
     render(<ProviderForm {...defaultProps} />);
 

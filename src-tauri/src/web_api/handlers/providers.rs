@@ -133,6 +133,15 @@ pub async fn add_provider(
     Ok(Json(created))
 }
 
+pub async fn upsert_opencode_v2(
+    State(state): State<Arc<AppState>>,
+    Json(provider): Json<Provider>,
+) -> ApiResult<bool> {
+    let created =
+        ProviderService::add(&state, crate::AppType::Opencode, provider).map_err(ApiError::from)?;
+    Ok(Json(created))
+}
+
 pub async fn update_provider(
     State(state): State<Arc<AppState>>,
     Path(path): Path<ProviderPath>,
@@ -198,6 +207,24 @@ pub async fn opencode_live_provider_ids(
         .map(|providers| providers.keys().cloned().collect())
         .map_err(ApiError::from)?;
     Ok(Json(ids))
+}
+
+pub async fn opencode_default_model() -> ApiResult<Option<String>> {
+    Ok(Json(
+        crate::opencode_config::get_default_model().map_err(ApiError::from)?,
+    ))
+}
+
+#[derive(Deserialize)]
+pub struct OpenCodeDefaultModelPayload {
+    model: String,
+}
+
+pub async fn set_opencode_default_model(
+    Json(payload): Json<OpenCodeDefaultModelPayload>,
+) -> ApiResult<bool> {
+    crate::opencode_config::set_default_model(&payload.model).map_err(ApiError::from)?;
+    Ok(Json(true))
 }
 
 pub async fn claude_desktop_default_routes(

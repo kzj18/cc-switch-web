@@ -56,6 +56,11 @@ pub fn convert_to_opencode_format(spec: &Value) -> Result<Value, AppError> {
         _ => return Err(AppError::McpValidation(format!("Unknown MCP type: {typ}"))),
     }
 
+    for key in ["oauth", "timeout", "cwd", "codemode", "protocol"] {
+        if let Some(value) = obj.get(key) {
+            result.insert(key.into(), value.clone());
+        }
+    }
     Ok(Value::Object(result))
 }
 
@@ -159,9 +164,14 @@ pub fn import_mcp_map(
             continue;
         }
 
+        let enabled = !spec
+            .get("disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && spec.get("enabled").and_then(Value::as_bool).unwrap_or(true);
         if let Some(existing) = servers.get_mut(&id) {
-            if !existing.apps.opencode {
-                existing.apps.opencode = true;
+            if existing.apps.opencode != enabled {
+                existing.apps.opencode = enabled;
                 changed += 1;
             }
         } else {
@@ -175,7 +185,7 @@ pub fn import_mcp_map(
                         claude: false,
                         codex: false,
                         gemini: false,
-                        opencode: true,
+                        opencode: enabled,
                     },
                     description: None,
                     homepage: None,

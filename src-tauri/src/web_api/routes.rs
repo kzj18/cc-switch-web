@@ -17,6 +17,7 @@ use super::{
 pub fn create_router(state: SharedState) -> Router {
     Router::new()
         .route("/capabilities", get(capabilities::get_capabilities))
+        .nest("/v2/opencode", opencode_v2_routes())
         .route("/health/status", get(health::proxy_status))
         .nest("/auth", auth_routes())
         .nest("/providers", provider_routes())
@@ -192,6 +193,13 @@ fn stream_check_routes() -> Router<SharedState> {
         )
 }
 
+fn opencode_v2_routes() -> Router<SharedState> {
+    Router::new()
+        .route("/providers", post(providers::upsert_opencode_v2))
+        .route("/mcp/servers/:id", put(mcp::update_server))
+        .route("/mcp/servers/:id/enabled", post(mcp::toggle_opencode_v2))
+}
+
 fn provider_routes() -> Router<SharedState> {
     Router::new()
         .route("/universal", get(providers::list_universal_providers))
@@ -221,6 +229,10 @@ fn provider_routes() -> Router<SharedState> {
         .route(
             "/opencode/live-provider-ids",
             get(providers::opencode_live_provider_ids),
+        )
+        .route(
+            "/opencode/default-model",
+            get(providers::opencode_default_model).put(providers::set_opencode_default_model),
         )
         .route(
             "/claude-desktop/default-routes",

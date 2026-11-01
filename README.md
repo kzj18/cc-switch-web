@@ -1,5 +1,10 @@
 # cc-switch-web
 
+> Maintained fork: [kzj18/cc-switch-web](https://github.com/kzj18/cc-switch-web).
+> Based on Laliet v0.21.0, with scoped native OpenCode v2 configuration support and
+> Toolbox integration. See [maintenance scope, validation and release policy](docs/MAINTAINING.md).
+> Historical upstream release/download links below are retained for reference.
+
 > Web-based CC Switch for Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw & OMO.
 
 <sub>🙏 This project is a fork of [farion1231/cc-switch](https://github.com/farion1231/cc-switch) by Jason Young. Thanks to the original author for the excellent work. This fork adds Web Server mode for cloud/headless deployment.</sub>

@@ -76,14 +76,15 @@ enum LiveSnapshot {
         config: Option<Value>,                // 新增：settings.json 内容
     },
     Opencode {
-        config: Option<Value>,
+        path: std::path::PathBuf,
+        config: Option<String>,
     },
     OpenClaw {
         config: Option<String>,
     },
     Omo {
         config: Option<Value>,
-        opencode_config: Option<Value>,
+        opencode_config: Option<String>,
         slim: bool,
     },
 }
@@ -99,7 +100,21 @@ struct PostCommitAction {
 }
 
 impl LiveSnapshot {
-    fn restore(&self) -> Result<(), AppError> {
+    fn preserves_native_opencode(&self) -> bool {
+        let source = match self {
+            Self::Opencode { config, .. } => config,
+            Self::Omo {
+                opencode_config, ..
+            } => opencode_config,
+            _ => return false,
+        };
+        source
+            .as_deref()
+            .and_then(|value| json5::from_str::<Value>(value).ok())
+            .map_or(true, |value| crate::opencode_config::native_config(&value))
+    }
+
+    fn restore(&self, preserve_opencode: bool) -> Result<(), AppError> {
         match self {
             LiveSnapshot::Noop => {}
             LiveSnapshot::Claude { settings } => {
@@ -150,10 +165,12 @@ impl LiveSnapshot {
                     _ => {}
                 }
             }
-            LiveSnapshot::Opencode { config } => {
-                let path = crate::opencode_config::get_opencode_config_path();
+            LiveSnapshot::Opencode { path, config } => {
+                if preserve_opencode {
+                    return Ok(());
+                }
                 if let Some(value) = config {
-                    write_json_file(&path, value)?;
+                    crate::config::atomic_write(&path, value.as_bytes())?;
                 } else if path.exists() {
                     delete_file(&path)?;
                 }
@@ -186,9 +203,12 @@ impl LiveSnapshot {
                     delete_file(&path)?;
                 }
 
+                if preserve_opencode {
+                    return Ok(());
+                }
                 let opencode_path = crate::opencode_config::get_opencode_config_path();
                 if let Some(value) = opencode_config {
-                    crate::opencode_config::write_opencode_config(value)?;
+                    crate::config::atomic_write(&opencode_path, value.as_bytes())?;
                 } else if opencode_path.exists() {
                     delete_file(&opencode_path)?;
                 }
@@ -706,6 +726,19 @@ impl ProviderService {
 
         if let Some(action) = action {
             if let Err(err) = Self::apply_post_commit(state, &action) {
+                let opencode_conflict = matches!(
+                    action.app_type,
+                    AppType::Opencode | AppType::Omo | AppType::OmoSlim
+                ) && matches!(err, AppError::Conflict(_));
+                if opencode_conflict || action.backup.preserves_native_opencode() {
+                    // A post-write failure does not prove exclusive ownership of the
+                    // current file. Retain it rather than replay an earlier snapshot.
+                    Self::restore_config_only(state, original)?;
+                    action.backup.restore(true)?;
+                    return Err(AppError::localized("post_commit.opencode_verify_required",
+                        format!("{err}；服务记录已恢复，OpenCode 文件保留当前内容，请刷新核对是否已应用"),
+                        format!("{err}; stored records restored; OpenCode file retained for verification")));
+                }
                 if let Err(rollback_err) =
                     Self::rollback_after_failure(state, original.clone(), action.backup.clone())
                 {
@@ -732,7 +765,7 @@ impl ProviderService {
         backup: LiveSnapshot,
     ) -> Result<(), AppError> {
         Self::restore_config_only(state, snapshot)?;
-        backup.restore()
+        backup.restore(false)
     }
 
     fn apply_post_commit(state: &AppState, action: &PostCommitAction) -> Result<(), AppError> {
@@ -876,16 +909,18 @@ impl ProviderService {
                 }
 
                 let live_after = crate::opencode_config::read_opencode_config()?;
-                let fragment = live_after
-                    .get("provider")
-                    .and_then(|value| value.get(provider_id))
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
+                let (fragment, format) =
+                    crate::opencode_config::provider_fragment(provider_id, &live_after, None)?;
+                let fragment = fragment.clone();
 
                 state.update_config(|cfg| {
                     if let Some(manager) = cfg.get_manager_mut(app_type) {
                         if let Some(target) = manager.providers.get_mut(provider_id) {
                             target.settings_config = fragment;
+                            target
+                                .meta
+                                .get_or_insert_with(ProviderMeta::default)
+                                .opencode_config_format = Some(format);
                         }
                     }
                     Ok(())
@@ -994,11 +1029,16 @@ impl ProviderService {
             AppType::Opencode => {
                 let path = crate::opencode_config::get_opencode_config_path();
                 let config = if path.exists() {
-                    Some(read_json_file::<Value>(&path)?)
+                    Some(std::fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?)
                 } else {
                     None
                 };
-                Ok(LiveSnapshot::Opencode { config })
+                let path = if path.exists() {
+                    std::fs::canonicalize(&path).map_err(|error| AppError::io(&path, error))?
+                } else {
+                    path
+                };
+                Ok(LiveSnapshot::Opencode { path, config })
             }
             AppType::OpenClaw => {
                 let path = crate::openclaw_config::get_openclaw_config_path();
@@ -1028,7 +1068,10 @@ impl ProviderService {
                 };
                 let opencode_path = crate::opencode_config::get_opencode_config_path();
                 let opencode_config = if opencode_path.exists() {
-                    Some(read_json_file::<Value>(&opencode_path)?)
+                    Some(
+                        std::fs::read_to_string(&opencode_path)
+                            .map_err(|e| AppError::io(&opencode_path, e))?,
+                    )
                 } else {
                     None
                 };
@@ -1209,7 +1252,8 @@ impl ProviderService {
                     app_type: app_type_clone.clone(),
                     provider: live_provider,
                     backup,
-                    sync_mcp: true,
+                    sync_mcp: !(matches!(app_type_clone, AppType::Opencode)
+                        && crate::opencode_config::uses_native_config()?),
                     refresh_snapshot: true,
                     set_additive_default: is_current,
                 })
@@ -1553,7 +1597,7 @@ impl ProviderService {
                 })
             }
             AppType::Opencode => {
-                let providers = crate::opencode_config::get_providers()?;
+                let providers = crate::opencode_config::get_providers_with_format()?;
                 if providers.is_empty() {
                     return Err(AppError::localized(
                         "opencode.live.missing",
@@ -1562,26 +1606,50 @@ impl ProviderService {
                     ));
                 }
 
-                let mut provider_entries: Vec<(String, Value)> = providers.into_iter().collect();
+                let mut provider_entries: Vec<_> = providers.into_iter().collect();
                 provider_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+                let live_default = crate::opencode_config::get_default_model()?.and_then(|model| {
+                    model
+                        .split_once('/')
+                        .map(|(provider, _)| provider.to_string())
+                });
 
                 state.update_config(|cfg| {
                     let manager = cfg
                         .get_manager_mut(&app_type)
                         .ok_or_else(|| Self::app_not_found(&app_type))?;
 
-                    for (provider_id, settings_config) in provider_entries {
-                        let mut provider = Provider::with_id(
-                            provider_id.clone(),
-                            provider_id.clone(),
-                            settings_config,
-                            None,
-                        );
-                        provider.category = Some("custom".to_string());
+                    for (provider_id, (settings_config, format)) in provider_entries {
+                        let mut provider = manager
+                            .providers
+                            .get(&provider_id)
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                Provider::with_id(
+                                    provider_id.clone(),
+                                    provider_id.clone(),
+                                    settings_config.clone(),
+                                    None,
+                                )
+                            });
+                        provider.settings_config = settings_config;
+                        provider
+                            .meta
+                            .get_or_insert_with(ProviderMeta::default)
+                            .opencode_config_format = Some(format);
+                        provider
+                            .category
+                            .get_or_insert_with(|| "custom".to_string());
                         manager.providers.insert(provider.id.clone(), provider);
                     }
 
-                    let preferred_current = if manager.providers.contains_key("default") {
+                    let preferred_current = if let Some(id) =
+                        live_default.filter(|id| manager.providers.contains_key(id))
+                    {
+                        Some(id)
+                    } else if manager.providers.contains_key(&manager.current) {
+                        Some(manager.current.clone())
+                    } else if manager.providers.contains_key("default") {
                         Some("default".to_string())
                     } else {
                         manager.providers.keys().min().cloned()
@@ -1791,26 +1859,24 @@ impl ProviderService {
         state: &AppState,
         live_settings: Value,
     ) -> Result<(), AppError> {
-        let fragment = {
-            let config = state.load_config()?;
+        state.update_config(|config| {
             let manager = config
-                .get_manager(&AppType::Opencode)
+                .get_manager_mut(&AppType::Opencode)
                 .ok_or_else(|| Self::app_not_found(&AppType::Opencode))?;
             if manager.current.is_empty() {
                 return Ok(());
             }
-
-            live_settings
-                .get("provider")
-                .and_then(|value| value.get(&manager.current))
-                .cloned()
-        };
-
-        let Some(fragment) = fragment else {
-            return Ok(());
-        };
-
-        Self::sync_current_provider_from_live(state, AppType::Opencode, fragment)
+            let (fragment, format) =
+                crate::opencode_config::provider_fragment(&manager.current, &live_settings, None)?;
+            if let Some(provider) = manager.providers.get_mut(&manager.current) {
+                provider.settings_config = fragment.clone();
+                provider
+                    .meta
+                    .get_or_insert_with(ProviderMeta::default)
+                    .opencode_config_format = Some(format);
+            }
+            Ok(())
+        })
     }
 
     /// 读取当前 live 配置
@@ -2322,7 +2388,9 @@ impl ProviderService {
                 app_type: app_type_clone.clone(),
                 provider,
                 backup,
-                sync_mcp: !matches!(app_type_clone, AppType::ClaudeDesktop | AppType::OpenClaw),
+                sync_mcp: !matches!(app_type_clone, AppType::ClaudeDesktop | AppType::OpenClaw)
+                    && !(matches!(app_type_clone, AppType::Opencode)
+                        && crate::opencode_config::uses_native_config()?),
                 refresh_snapshot: !matches!(app_type_clone, AppType::ClaudeDesktop),
                 set_additive_default: matches!(app_type_clone, AppType::OpenClaw),
             };
@@ -2683,16 +2751,17 @@ impl ProviderService {
             return Ok(());
         }
 
-        let live_config = crate::opencode_config::read_opencode_config()?;
-        let current_settings = live_config
-            .get("provider")
-            .and_then(|value| value.get(&current_id))
-            .cloned();
+        let current_settings =
+            crate::opencode_config::get_providers_with_format()?.remove(&current_id);
 
-        if let Some(settings) = current_settings {
+        if let Some((settings, format)) = current_settings {
             if let Some(manager) = config.get_manager_mut(&AppType::Opencode) {
                 if let Some(current) = manager.providers.get_mut(&current_id) {
                     current.settings_config = settings;
+                    current
+                        .meta
+                        .get_or_insert_with(ProviderMeta::default)
+                        .opencode_config_format = Some(format);
                 }
             }
         }
@@ -2857,43 +2926,21 @@ impl ProviderService {
     }
 
     pub(crate) fn write_opencode_live(provider: &Provider) -> Result<(), AppError> {
-        let settings = provider.settings_config.as_object().ok_or_else(|| {
-            AppError::localized(
-                "provider.opencode.settings.not_object",
-                "OpenCode 配置必须是 JSON 对象",
-                "OpenCode configuration must be a JSON object",
-            )
-        })?;
-
-        let fragment =
-            if let Some(providers) = settings.get("provider").and_then(|value| value.as_object()) {
-                providers.get(&provider.id).cloned().ok_or_else(|| {
-                    AppError::localized(
-                        "provider.opencode.fragment.missing",
-                        format!("OpenCode 配置缺少 provider.{}", provider.id),
-                        format!("OpenCode configuration is missing provider.{}", provider.id),
-                    )
-                })?
-            } else if settings.contains_key("$schema") {
-                return Err(AppError::localized(
-                    "provider.opencode.fragment.missing",
-                    format!("OpenCode 配置缺少 provider.{}", provider.id),
-                    format!("OpenCode configuration is missing provider.{}", provider.id),
-                ));
-            } else {
-                provider.settings_config.clone()
-            };
-
+        let source = provider
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.opencode_config_format);
+        let (fragment, format) = crate::opencode_config::provider_fragment(
+            &provider.id,
+            &provider.settings_config,
+            source,
+        )?;
         if !fragment.is_object() {
-            return Err(AppError::localized(
-                "provider.opencode.fragment.not_object",
-                format!("OpenCode provider.{} 必须是 JSON 对象", provider.id),
-                format!("OpenCode provider.{} must be a JSON object", provider.id),
+            return Err(AppError::Config(
+                "OpenCode provider must be an object".into(),
             ));
         }
-
-        crate::opencode_config::set_provider(&provider.id, fragment)?;
-        Ok(())
+        crate::opencode_config::set_provider_with_format(&provider.id, fragment.clone(), format)
     }
 
     fn openclaw_fragment(provider: &Provider) -> Result<Value, AppError> {
@@ -2954,6 +3001,9 @@ impl ProviderService {
     }
 
     pub(crate) fn write_omo_live(provider: &Provider) -> Result<(), AppError> {
+        if crate::opencode_config::uses_native_config()? {
+            return Err(AppError::Config("当前 OMO 预设未验证原生 OpenCode v2 插件接口，未修改配置；请使用兼容 v2 的原生插件".into()));
+        }
         if !provider.settings_config.is_object() {
             return Err(AppError::localized(
                 "provider.omo.settings.not_object",
@@ -2969,6 +3019,9 @@ impl ProviderService {
     }
 
     pub(crate) fn write_omo_slim_live(provider: &Provider) -> Result<(), AppError> {
+        if crate::opencode_config::uses_native_config()? {
+            return Err(AppError::Config("当前 OMO Slim 预设未验证原生 OpenCode v2 插件接口，未修改配置；请使用兼容 v2 的原生插件".into()));
+        }
         if !provider.settings_config.is_object() {
             return Err(AppError::localized(
                 "provider.omo.settings.not_object",
@@ -3089,6 +3142,18 @@ impl ProviderService {
                 validate_gemini_settings(&provider.settings_config)?
             }
             AppType::Opencode => {
+                let source = provider
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.opencode_config_format);
+                let (fragment, format) = crate::opencode_config::provider_fragment(
+                    &provider.id,
+                    &provider.settings_config,
+                    source,
+                )?;
+                if format == crate::provider::OpenCodeConfigFormat::V2 {
+                    crate::opencode_config::validate_native_provider(&provider.id, fragment)?;
+                }
                 if !provider.settings_config.is_object() {
                     return Err(AppError::localized(
                         "provider.opencode.settings.not_object",

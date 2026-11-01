@@ -1,5 +1,9 @@
 # cc-switch-web
 
+> 自维护仓库：[kzj18/cc-switch-web](https://github.com/kzj18/cc-switch-web)。
+> 以实际使用的 Laliet v0.21.0 为基础，增补原生 OpenCode v2 配置支持及 Toolbox 对接。
+> 范围、验证和交付方式见[维护说明](docs/MAINTAINING.md)；下文历史上游下载链接保留作参考。
+
 > 面向 Claude Code、Codex、Gemini CLI、OpenCode、OpenClaw 与 OMO 的 Web 版 CC Switch。
 
 <sub>🙏 本项目是 [farion1231/cc-switch](https://github.com/farion1231/cc-switch)（Jason Young）的 fork 版本。感谢原作者的出色工作。本 fork 添加了 Web 服务器模式，支持云端/无头部署。</sub>

@@ -101,6 +101,7 @@ export interface ProviderAuthBinding {
 
 // 供应商元数据（字段名与后端一致，保持 snake_case）
 export interface ProviderMeta {
+  opencodeConfigFormat?: "v1" | "v2";
   // 自定义端点：以 URL 为键，值为端点信息
   custom_endpoints?: Record<string, CustomEndpoint>;
   // Claude Desktop 写入模式：direct 直连 / proxy 本地路由

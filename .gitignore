@@ -13,7 +13,6 @@ src-tauri/target/
 .npmrc
 *.AppImage
 CLAUDE.md
-AGENTS.md
 GEMINI.md
 /.claude
 /.codex

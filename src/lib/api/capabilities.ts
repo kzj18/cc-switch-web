@@ -20,6 +20,7 @@ export interface FeatureCapabilities {
 }
 
 export interface AppCapabilities {
+  configVersions?: number[];
   providers: boolean;
   prompts: boolean;
   mcp: boolean;

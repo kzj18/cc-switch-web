@@ -96,7 +96,7 @@ impl McpService {
 
     /// 添加或更新 MCP 服务器
     pub fn upsert_server(state: &AppState, server: McpServer) -> Result<(), AppError> {
-        state.update_config(|cfg| {
+        let definition_changed = state.update_config(|cfg| {
             // 确保 servers 字段存在
             if cfg.mcp.servers.is_none() {
                 cfg.mcp.servers = Some(HashMap::new());
@@ -104,14 +104,19 @@ impl McpService {
 
             let servers = cfg.mcp.servers.as_mut().unwrap();
             let id = server.id.clone();
+            let definition_changed = servers.get(&id).map_or(true, |old| {
+                old.server != server.server || old.apps != server.apps
+            });
 
             // 插入或更新
             servers.insert(id, server.clone());
-            Ok(())
+            Ok(definition_changed)
         })?;
 
         // 同步到各个启用的应用
-        Self::sync_server_to_apps(state, &server)?;
+        if definition_changed {
+            Self::sync_server_to_apps(state, &server)?;
+        }
 
         Ok(())
     }
@@ -159,6 +164,8 @@ impl McpService {
             // 同步到对应应用
             if enabled {
                 Self::sync_server_to_app(state, &server, &app)?;
+            } else if matches!(app, AppType::Opencode | AppType::Omo | AppType::OmoSlim) {
+                crate::opencode_config::set_mcp_server_enabled(server_id, false)?;
             } else {
                 Self::remove_server_from_app(state, server_id, &app)?;
             }

@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "status": "confirmed",
+  "confirmed_at": "2026-10-30",
+  "mode": "development",
+  "repository": {
+    "shape": "single-app",
+    "default_work_type": "web-app"
+  }
+}

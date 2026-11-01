@@ -95,6 +95,16 @@ pub async fn toggle_app(
     Ok(Json(true))
 }
 
+pub async fn toggle_opencode_v2(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<ToggleAppPayload>,
+) -> ApiResult<bool> {
+    McpService::toggle_app(&state, &id, AppType::Opencode, payload.enabled)
+        .map_err(internal_error)?;
+    Ok(Json(true))
+}
+
 /// 获取 Claude MCP 状态
 pub async fn get_status() -> ApiResult<claude_mcp::McpStatus> {
     let status = claude_mcp::get_mcp_status().map_err(internal_error)?;
