@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
-use crate::app_config::{McpConfig, MultiAppConfig};
+use crate::app_config::{AppType, MultiAppConfig};
 use crate::config::write_text_file;
 use crate::error::AppError;
 
@@ -12,10 +12,25 @@ use super::validation::validate_server_spec;
 // 辅助函数（从 mcp.rs 迁移）
 // ============================================================================
 
-/// 返回已启用的 MCP 服务器（过滤 enabled==true）
-fn collect_enabled_servers(cfg: &McpConfig) -> HashMap<String, Value> {
+/// 统一存储存在时，以对应应用开关为准；旧结构只用于尚未迁移的配置。
+/// Some(empty) 也必须保持权威，避免已停用或删除的服务器从旧结构中复活。
+fn collect_enabled_servers(config: &MultiAppConfig, app: &AppType) -> HashMap<String, Value> {
+    if let Some(servers) = &config.mcp.servers {
+        return servers
+            .iter()
+            .filter(|(_, server)| server.apps.is_enabled_for(app))
+            .filter_map(|(id, server)| match validate_server_spec(&server.server) {
+                Ok(()) => Some((id.clone(), server.server.clone())),
+                Err(err) => {
+                    log::warn!("跳过无效的 MCP 条目 '{id}': {err}");
+                    None
+                }
+            })
+            .collect();
+    }
+
     let mut out = HashMap::new();
-    for (id, entry) in cfg.servers.iter() {
+    for (id, entry) in &config.mcp_for(app).servers {
         let enabled = entry
             .get("enabled")
             .and_then(|v| v.as_bool())
@@ -58,13 +73,13 @@ fn extract_server_spec(entry: &Value) -> Result<Value, AppError> {
 // 全量同步函数
 // ============================================================================
 
-/// 将 config.json 中 enabled==true 的项投影写入 ~/.claude.json
+/// 将当前配置中 Claude 已启用的 MCP 投影写入 ~/.claude.json
 pub fn sync_enabled_to_claude(config: &MultiAppConfig) -> Result<(), AppError> {
-    let enabled = collect_enabled_servers(&config.mcp.claude);
+    let enabled = collect_enabled_servers(config, &AppType::Claude);
     crate::claude_mcp::set_mcp_servers_map(&enabled)
 }
 
-/// 将 config.json 中 Codex 的 enabled==true 项以 TOML 形式写入 ~/.codex/config.toml
+/// 将当前配置中 Codex 已启用的 MCP 以 TOML 形式写入 ~/.codex/config.toml
 ///
 /// 格式策略：
 /// - 唯一正确格式：[mcp_servers] 顶层表（Codex 官方标准）
@@ -76,7 +91,7 @@ pub fn sync_enabled_to_codex(config: &MultiAppConfig) -> Result<(), AppError> {
     use toml_edit::{Item, Table};
 
     // 1) 收集启用项（Codex 维度）
-    let enabled = collect_enabled_servers(&config.mcp.codex);
+    let enabled = collect_enabled_servers(config, &AppType::Codex);
 
     // 2) 读取现有 config.toml 文本；保持无效 TOML 的错误返回（不覆盖文件）
     let base_text = crate::codex_config::read_and_validate_codex_config_text()?;
@@ -132,9 +147,9 @@ pub fn sync_enabled_to_codex(config: &MultiAppConfig) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 将 config.json 中 enabled==true 的项投影写入 ~/.gemini/settings.json
+/// 将当前配置中 Gemini 已启用的 MCP 投影写入 ~/.gemini/settings.json
 pub fn sync_enabled_to_gemini(config: &MultiAppConfig) -> Result<(), AppError> {
-    let enabled = collect_enabled_servers(&config.mcp.gemini);
+    let enabled = collect_enabled_servers(config, &AppType::Gemini);
     crate::gemini_mcp::set_mcp_servers_map(&enabled)
 }
 

@@ -55,6 +55,17 @@ Basic Auth / CSRF、现有 REST API 和 SQLite Schema v7。开发目录使用 `o
 `ai-config-sync` 只向当前 provider 发布该 provider 的片段和格式元数据；
 `cc-switch-matrix` 保留自己的分组、审阅、幂等和回读逻辑，并按实例能力开放 OpenCode。
 
+## MCP 全量同步的数据源
+
+SQLite 读回的统一 `mcp.servers` 和每个服务器的 `apps` 开关是全量投影的数据源，
+Claude、Codex、Gemini 使用相同的选择规则。统一集合存在但为空时仍以它为准，
+不会回退到旧的分客户端记录；只有尚未迁移、缺少统一集合的配置才读取旧记录。
+
+`POST /api/providers/sync-current` 在写入 Codex provider 后投影这些启用项，再读回
+实际 `config.toml` 更新 provider 快照。不能从 SQLite 快照中为空的旧
+`mcp.codex.servers` 推断用户关闭了全部 MCP；否则页面仍显示开启，但 Codex MCP 表会被删除。
+该流程包含导入配置和切换配置目录后的显式同步，不需要通过成对切换 MCP 开关来补救。
+
 ## 版本与交付
 
 本维护线使用 `4.1.0` 起的稳定版本号。原因是 fork 继承了历史 `v3.7.0` tag，而
@@ -76,6 +87,7 @@ pnpm exec vitest run --maxWorkers=2 --minWorkers=1
 pnpm build:web
 cd src-tauri
 cargo test --locked --no-default-features --features web-server --test opencode_v2 --test provider_service --test web_auth -- --test-threads=1
+cargo test --locked --no-default-features --features web-server --test import_export_sync --test mcp_unified_sync --test web_provider_mcp_sync -- --test-threads=1
 cargo test --locked --no-default-features --features web-server --lib -- --test-threads=1
 cargo build --locked --no-default-features --features web-server --example server
 ```

@@ -155,6 +155,7 @@ fn sync_codex_provider_writes_auth_and_config() {
     reset_test_fs();
 
     let mut config = MultiAppConfig::default();
+    config.mcp.servers = None; // Exercise a legacy snapshot before SQLite migration.
 
     // 添加入测 MCP 启用项，确保 sync_enabled_to_codex 会写入 TOML
     config.mcp.codex.servers.insert(
@@ -235,6 +236,7 @@ fn sync_enabled_to_codex_writes_enabled_servers() {
     reset_test_fs();
 
     let mut config = MultiAppConfig::default();
+    config.mcp.servers = None;
     config.mcp.codex.servers.insert(
         "stdio-enabled".into(),
         json!({
@@ -279,6 +281,7 @@ mode = "dev"
 
     // 启用一个 MCP 项，触发增量写入
     let mut config = MultiAppConfig::default();
+    config.mcp.servers = None;
     config.mcp.codex.servers.insert(
         "echo".into(),
         json!({
@@ -334,6 +337,7 @@ fn sync_enabled_to_codex_migrates_erroneous_mcp_dot_servers_to_mcp_servers() {
     fs::write(&path, seed).expect("seed config.toml");
 
     let mut config = MultiAppConfig::default();
+    config.mcp.servers = None;
     config.mcp.codex.servers.insert(
         "echo".into(),
         json!({
@@ -393,6 +397,7 @@ fn sync_enabled_to_codex_returns_error_on_invalid_toml() {
     fs::write(&path, "invalid = [").expect("write invalid config");
 
     let mut config = MultiAppConfig::default();
+    config.mcp.servers = None;
     config.mcp.codex.servers.insert(
         "broken".into(),
         json!({
@@ -676,6 +681,7 @@ fn sync_claude_enabled_mcp_projects_to_user_config() {
     let _guard = test_mutex().lock().expect("acquire test mutex");
     reset_test_fs();
     let mut config = MultiAppConfig::default();
+    config.mcp.servers = None;
 
     config.mcp.claude.servers.insert(
         "stdio-enabled".into(),
@@ -1291,6 +1297,7 @@ fn sync_gemini_mcp_excludes_type_field() {
     let home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
+    config.mcp.servers = None;
 
     // 创建包含 type: stdio 的 MCP 服务器配置
     config.mcp.gemini.servers.insert(

@@ -4,6 +4,8 @@
 > Based on Laliet v0.21.0, with scoped native OpenCode v2 configuration support and
 > Toolbox integration. See [maintenance scope, validation and release policy](docs/MAINTAINING.md).
 > Historical upstream release/download links below are retained for reference.
+> Full MCP synchronization reads the unified server store and per-client switches;
+> provider `sync-current` preserves enabled Codex MCPs and the saved provider snapshot.
 
 > Web-based CC Switch for Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw & OMO.
 
