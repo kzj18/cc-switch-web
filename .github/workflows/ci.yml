@@ -130,4 +130,4 @@ jobs:
           workspaces: src-tauri
 
       - name: Integration tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --tests --features test-hooks
+        run: cargo test --manifest-path src-tauri/Cargo.toml --tests --features test-hooks --no-fail-fast

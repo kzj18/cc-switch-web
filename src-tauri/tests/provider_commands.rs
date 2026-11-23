@@ -924,7 +924,7 @@ fn switch_provider_opencode_rejects_full_config_without_current_provider_fragmen
         .expect_err("switch should reject malformed full config");
     match err {
         AppError::Localized { key, .. } => {
-            assert_eq!(key, "provider.opencode.fragment.missing");
+            assert_eq!(key, "provider.opencode.fragment_missing");
         }
         other => panic!("unexpected error: {other:?}"),
     }
