@@ -587,6 +587,7 @@ pub fn get_default_model() -> Result<Option<String>, AppError> {
 }
 
 /// Only rewrites the top-level `model`; `small_model` and everything else stay as is.
+#[cfg(feature = "web-server")]
 pub fn set_default_model(model: &str) -> Result<(), AppError> {
     let model = model.trim();
     if !model
