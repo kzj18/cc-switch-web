@@ -24,10 +24,15 @@ impl AutoSyncSuppressionGuard {
 
 impl Drop for AutoSyncSuppressionGuard {
     fn drop(&mut self) {
-        let _ =
-            AUTO_SYNC_SUPPRESS_DEPTH.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |depth| {
-                Some(depth.saturating_sub(1))
-            });
+        let mut depth = AUTO_SYNC_SUPPRESS_DEPTH.load(Ordering::SeqCst);
+        while let Err(actual) = AUTO_SYNC_SUPPRESS_DEPTH.compare_exchange_weak(
+            depth,
+            depth.saturating_sub(1),
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            depth = actual;
+        }
     }
 }
 

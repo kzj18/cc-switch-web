@@ -170,9 +170,9 @@ impl LiveSnapshot {
                     return Ok(());
                 }
                 if let Some(value) = config {
-                    crate::config::atomic_write(&path, value.as_bytes())?;
+                    crate::config::atomic_write(path, value.as_bytes())?;
                 } else if path.exists() {
-                    delete_file(&path)?;
+                    delete_file(path)?;
                 }
             }
             LiveSnapshot::OpenClaw { config } => {
