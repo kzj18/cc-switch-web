@@ -676,7 +676,16 @@ fn mcp_servers_mut(config: &mut Value, native: bool) -> Result<&mut Map<String, 
         .ok_or_else(|| AppError::Config("OpenCode mcp.servers must be an object".into()))
 }
 
-pub fn set_mcp_server(id: &str, mut spec: Value) -> Result<(), AppError> {
+pub fn set_mcp_server(id: &str, spec: Value) -> Result<(), AppError> {
+    set_mcp_server_with_fields(id, spec, &[], true)
+}
+
+pub(crate) fn set_mcp_server_with_fields(
+    id: &str,
+    mut spec: Value,
+    owned_fields: &[String],
+    enabled: bool,
+) -> Result<(), AppError> {
     if !spec.is_object() {
         return Err(AppError::McpValidation(
             "OpenCode MCP server must be an object".into(),
@@ -684,11 +693,29 @@ pub fn set_mcp_server(id: &str, mut spec: Value) -> Result<(), AppError> {
     }
     try_edit_config(resolve_opencode_config_path, |config| {
         let native = native_config(config);
+        if !enabled {
+            let existing = native
+                .then(|| {
+                    config
+                        .pointer("/mcp/servers")
+                        .and_then(|servers| servers.get(id))
+                })
+                .flatten();
+            match existing {
+                None => return Ok(()),
+                Some(entry) if entry.get("disabled").and_then(Value::as_bool) == Some(true) => {}
+                Some(_) => {
+                    return Err(AppError::Conflict(
+                        "OpenCode MCP enablement has changed in its live configuration".into(),
+                    ));
+                }
+            }
+        }
         let servers = mcp_servers_mut(config, native)?;
         if native {
             let incoming = spec.as_object_mut().unwrap();
             incoming.remove("enabled");
-            incoming.insert("disabled".into(), json!(false));
+            incoming.insert("disabled".into(), json!(!enabled));
         }
         // Preserve host-specific OAuth, timeout, cwd and extension fields. Only
         // replace the transport fields owned by the unified definition.
@@ -707,6 +734,11 @@ pub fn set_mcp_server(id: &str, mut spec: Value) -> Result<(), AppError> {
             "headers",
             "enabled",
         ] {
+            merged.remove(key);
+        }
+        // A removed override must release its fields back to the shared
+        // definition, even when the converter omits the field entirely.
+        for key in owned_fields {
             merged.remove(key);
         }
         merged.extend(spec.as_object().unwrap().clone());

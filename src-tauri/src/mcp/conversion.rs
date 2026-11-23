@@ -205,9 +205,9 @@ pub(crate) fn json_server_to_toml_table(spec: &Value) -> Result<toml_edit::Table
 
                 // 记录扩展字段的处理
                 if extended_fields.contains(&key.as_str()) {
-                    log::debug!("已转换扩展字段 '{key}' = {value:?}");
+                    log::debug!("已转换扩展字段 '{key}'");
                 } else {
-                    log::info!("已转换自定义字段 '{key}' = {value:?}");
+                    log::debug!("已转换自定义字段 '{key}'");
                 }
             }
         }

@@ -11,6 +11,8 @@ pub struct RuntimeCapabilities {
     pub apps: Vec<&'static str>,
     pub features: FeatureCapabilities,
     pub app_features: BTreeMap<&'static str, AppCapabilities>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_app_override_version: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,6 +98,7 @@ impl RuntimeCapabilities {
                 claude_plugin_integration: false,
             },
             app_features: app_capabilities(true),
+            mcp_app_override_version: Some(1),
         }
     }
 
@@ -122,6 +125,7 @@ impl RuntimeCapabilities {
                 claude_plugin_integration: true,
             },
             app_features: app_capabilities(false),
+            mcp_app_override_version: None,
         }
     }
 }

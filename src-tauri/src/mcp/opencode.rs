@@ -132,6 +132,19 @@ pub fn sync_single_server_to_opencode(
     opencode_config::set_mcp_server(id, opencode_spec)
 }
 
+pub(crate) fn sync_server_with_fields(
+    id: &str,
+    server_spec: &Value,
+    owned_fields: &[String],
+    enabled: bool,
+) -> Result<(), AppError> {
+    if !should_sync_opencode_mcp() {
+        return Ok(());
+    }
+    let opencode_spec = convert_to_opencode_format(server_spec)?;
+    opencode_config::set_mcp_server_with_fields(id, opencode_spec, owned_fields, enabled)
+}
+
 pub fn remove_server_from_opencode(id: &str) -> Result<(), AppError> {
     if !should_sync_opencode_mcp() {
         return Ok(());

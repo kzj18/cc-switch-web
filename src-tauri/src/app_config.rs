@@ -107,6 +107,11 @@ pub struct McpRoot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub servers: Option<HashMap<String, McpServer>>,
 
+    /// Host-local merge patches. The versioned MCP API manages these separately
+    /// from the shared definition and ordinary config import/export.
+    #[serde(skip)]
+    pub app_overrides: McpAppOverrides,
+
     /// 旧的分应用存储（v3.6.x 及以前，保留用于迁移）
     #[serde(default, skip_serializing_if = "McpConfig::is_empty")]
     pub claude: McpConfig,
@@ -123,11 +128,54 @@ impl Default for McpRoot {
         Self {
             // v3.7.0+ 默认使用新的统一结构（空 HashMap）
             servers: Some(HashMap::new()),
+            app_overrides: HashMap::new(),
             // 旧结构保持空，仅用于反序列化旧配置时的迁移
             claude: McpConfig::default(),
             codex: McpConfig::default(),
             gemini: McpConfig::default(),
             opencode: McpConfig::default(),
+        }
+    }
+}
+
+pub type McpAppPatch = serde_json::Map<String, serde_json::Value>;
+pub type McpAppOverrides = HashMap<String, HashMap<String, McpAppPatch>>;
+
+impl McpRoot {
+    pub fn app_override(&self, id: &str, app: &AppType) -> Option<&McpAppPatch> {
+        let key = match app {
+            AppType::Omo | AppType::OmoSlim => "opencode",
+            other => other.as_str(),
+        };
+        self.app_overrides.get(id)?.get(key)
+    }
+
+    pub fn server_for_app(&self, server: &McpServer, app: &AppType) -> serde_json::Value {
+        let mut spec = server.server.clone();
+        if let Some(patch) = self.app_override(&server.id, app) {
+            merge_mcp_patch(&mut spec, patch);
+        }
+        spec
+    }
+}
+
+fn merge_mcp_patch(target: &mut serde_json::Value, patch: &McpAppPatch) {
+    use serde_json::Value;
+    if !target.is_object() {
+        *target = Value::Object(McpAppPatch::new());
+    }
+    let object = target.as_object_mut().expect("object initialized");
+    for (key, value) in patch {
+        match value {
+            Value::Null => {
+                object.remove(key);
+            }
+            Value::Object(inner) => {
+                merge_mcp_patch(object.entry(key.clone()).or_insert(Value::Null), inner);
+            }
+            _ => {
+                object.insert(key.clone(), value.clone());
+            }
         }
     }
 }

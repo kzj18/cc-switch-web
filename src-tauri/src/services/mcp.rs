@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::app_config::{AppType, McpApps, McpServer, MultiAppConfig};
+use crate::app_config::{
+    AppType, McpAppOverrides, McpAppPatch, McpApps, McpServer, MultiAppConfig,
+};
 use crate::error::AppError;
 use crate::mcp;
 use crate::store::AppState;
@@ -97,6 +99,16 @@ impl McpService {
     /// 添加或更新 MCP 服务器
     pub fn upsert_server(state: &AppState, server: McpServer) -> Result<(), AppError> {
         let definition_changed = state.update_config(|cfg| {
+            for app in [
+                AppType::Claude,
+                AppType::Codex,
+                AppType::Gemini,
+                AppType::Opencode,
+            ] {
+                if cfg.mcp.app_override(&server.id, &app).is_some() {
+                    mcp::validation::validate_server_spec(&cfg.mcp.server_for_app(&server, &app))?;
+                }
+            }
             // 确保 servers 字段存在
             if cfg.mcp.servers.is_none() {
                 cfg.mcp.servers = Some(HashMap::new());
@@ -119,6 +131,103 @@ impl McpService {
         }
 
         Ok(())
+    }
+
+    pub fn app_overrides(state: &AppState) -> Result<McpAppOverrides, AppError> {
+        Ok(state.load_config()?.mcp.app_overrides)
+    }
+
+    pub fn set_app_override(
+        state: &AppState,
+        id: &str,
+        app: AppType,
+        expected_server: serde_json::Value,
+        expected_enabled: bool,
+        expected_override: Option<McpAppPatch>,
+        patch: Option<McpAppPatch>,
+    ) -> Result<(), AppError> {
+        if !matches!(
+            app,
+            AppType::Claude | AppType::Codex | AppType::Gemini | AppType::Opencode
+        ) {
+            return Err(AppError::McpValidation("Unsupported MCP client".into()));
+        }
+        if patch.as_ref().is_some_and(|value| {
+            value.is_empty()
+                || value.keys().any(|key| {
+                    matches!(key.as_str(), "id" | "enabled" | "disabled" | "apps")
+                        || (app == AppType::Opencode
+                            && !matches!(
+                                key.as_str(),
+                                "type"
+                                    | "command"
+                                    | "args"
+                                    | "env"
+                                    | "url"
+                                    | "headers"
+                                    | "oauth"
+                                    | "timeout"
+                                    | "cwd"
+                                    | "codemode"
+                                    | "protocol"
+                            ))
+                })
+        }) {
+            return Err(AppError::McpValidation(
+                "Invalid MCP override fields".into(),
+            ));
+        }
+        state.db.update_mcp_app_overrides(|root| {
+            let server = root
+                .servers
+                .as_ref()
+                .and_then(|servers| servers.get(id))
+                .cloned()
+                .ok_or_else(|| AppError::Conflict("MCP definition no longer exists".into()))?;
+            if server.server != expected_server
+                || server.apps.is_enabled_for(&app) != expected_enabled
+                || root.app_override(id, &app) != expected_override.as_ref()
+            {
+                return Err(AppError::Conflict(
+                    "MCP definition or CLI override changed".into(),
+                ));
+            }
+
+            let previous_fields = expected_override
+                .iter()
+                .flat_map(|value| value.keys())
+                .cloned()
+                .collect::<Vec<_>>();
+            let overrides = root.app_overrides.entry(id.to_owned()).or_default();
+            if let Some(patch) = patch {
+                overrides.insert(app.as_str().to_owned(), patch);
+            } else {
+                overrides.remove(app.as_str());
+            }
+            if overrides.is_empty() {
+                root.app_overrides.remove(id);
+            }
+            let cfg = MultiAppConfig {
+                mcp: root.clone(),
+                ..Default::default()
+            };
+            let spec = cfg.mcp.server_for_app(&server, &app);
+            mcp::validation::validate_server_spec(&spec)?;
+            if app == AppType::Opencode {
+                let mut fields = previous_fields;
+                fields.extend(
+                    cfg.mcp
+                        .app_override(id, &app)
+                        .iter()
+                        .flat_map(|value| value.keys())
+                        .map(|key| (*key).clone()),
+                );
+                mcp::opencode::sync_server_with_fields(id, &spec, &fields, expected_enabled)?;
+            } else if expected_enabled {
+                Self::sync_server_to_app_with_fields(&cfg, &server, &app, &previous_fields)?;
+            }
+            Ok(())
+        })
     }
 
     /// 删除 MCP 服务器
@@ -200,18 +309,41 @@ impl McpService {
         server: &McpServer,
         app: &AppType,
     ) -> Result<(), AppError> {
+        Self::sync_server_to_app_with_fields(cfg, server, app, &[])
+    }
+
+    fn sync_server_to_app_with_fields(
+        cfg: &MultiAppConfig,
+        server: &McpServer,
+        app: &AppType,
+        previous_fields: &[String],
+    ) -> Result<(), AppError> {
+        let spec = cfg.mcp.server_for_app(server, app);
         match app {
             AppType::Claude => {
-                mcp::sync_single_server_to_claude(cfg, &server.id, &server.server)?;
+                mcp::sync_single_server_to_claude(cfg, &server.id, &spec)?;
             }
             AppType::Codex => {
-                mcp::sync_single_server_to_codex(cfg, &server.id, &server.server)?;
+                mcp::sync_single_server_to_codex(cfg, &server.id, &spec)?;
             }
             AppType::Gemini => {
-                mcp::sync_single_server_to_gemini(cfg, &server.id, &server.server)?;
+                mcp::sync_single_server_to_gemini(cfg, &server.id, &spec)?;
             }
             AppType::Opencode | AppType::Omo | AppType::OmoSlim => {
-                mcp::sync_single_server_to_opencode(cfg, &server.id, &server.server)?;
+                if let Some(patch) = cfg.mcp.app_override(&server.id, app) {
+                    let mut fields = previous_fields.to_vec();
+                    fields.extend(patch.keys().cloned());
+                    mcp::opencode::sync_server_with_fields(&server.id, &spec, &fields, true)?;
+                } else if !previous_fields.is_empty() {
+                    mcp::opencode::sync_server_with_fields(
+                        &server.id,
+                        &spec,
+                        previous_fields,
+                        true,
+                    )?;
+                } else {
+                    mcp::sync_single_server_to_opencode(cfg, &server.id, &spec)?;
+                }
             }
             AppType::ClaudeDesktop | AppType::OpenClaw => {
                 return Err(AppError::localized(
@@ -253,71 +385,18 @@ impl McpService {
     /// 手动同步所有启用的 MCP 服务器到对应的应用
     pub fn sync_all_enabled(state: &AppState) -> Result<(), AppError> {
         let servers = Self::get_all_servers(state)?;
-        let mut cfg = state.load_config()?;
-        let mut sync_claude = false;
-        let mut sync_codex = false;
-        let mut sync_gemini = false;
-        let mut sync_opencode = false;
-
-        cfg.mcp.claude.servers.clear();
-        cfg.mcp.codex.servers.clear();
-        cfg.mcp.gemini.servers.clear();
-        cfg.mcp.opencode.servers.clear();
-
-        for (id, server) in servers {
-            let entry = serde_json::json!({
-                "id": id,
-                "name": server.name,
-                "server": server.server,
-                "enabled": true,
-                "description": server.description,
-                "homepage": server.homepage,
-                "docs": server.docs,
-                "tags": server.tags,
-            });
-
-            if server.apps.claude {
-                sync_claude = true;
-                cfg.mcp
-                    .claude
-                    .servers
-                    .insert(server.id.clone(), entry.clone());
-            }
-            if server.apps.codex {
-                sync_codex = true;
-                cfg.mcp
-                    .codex
-                    .servers
-                    .insert(server.id.clone(), entry.clone());
-            }
-            if server.apps.gemini {
-                sync_gemini = true;
-                cfg.mcp
-                    .gemini
-                    .servers
-                    .insert(server.id.clone(), entry.clone());
-            }
-            if server.apps.opencode {
-                sync_opencode = true;
-                cfg.mcp.opencode.servers.insert(server.id, entry);
-            }
-        }
-
-        if sync_claude {
+        let cfg = state.load_config()?;
+        if servers.values().any(|server| server.apps.claude) {
             mcp::sync_enabled_to_claude(&cfg)?;
         }
-        if sync_codex {
+        if servers.values().any(|server| server.apps.codex) {
             mcp::sync_enabled_to_codex(&cfg)?;
         }
-        if sync_gemini {
+        if servers.values().any(|server| server.apps.gemini) {
             mcp::sync_enabled_to_gemini(&cfg)?;
         }
-        if sync_opencode {
-            for (id, entry) in &cfg.mcp.opencode.servers {
-                if let Some(server_spec) = entry.get("server") {
-                    mcp::sync_single_server_to_opencode(&cfg, id, server_spec)?;
-                }
-            }
+        for server in servers.values().filter(|server| server.apps.opencode) {
+            Self::sync_server_to_app_internal(&cfg, server, &AppType::Opencode)?;
         }
 
         Ok(())
@@ -334,11 +413,12 @@ impl McpService {
         app: AppType,
     ) -> Result<HashMap<String, serde_json::Value>, AppError> {
         let all_servers = Self::get_all_servers(state)?;
+        let cfg = state.load_config()?;
         let mut result = HashMap::new();
 
         for (id, server) in all_servers {
             if server.apps.is_enabled_for(&app) {
-                result.insert(id, server.server);
+                result.insert(id, cfg.mcp.server_for_app(&server, &app));
             }
         }
 

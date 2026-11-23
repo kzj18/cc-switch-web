@@ -1,10 +1,14 @@
-use super::super::{from_json_string, to_json_string, Database};
+use super::super::{from_json_string, lock_conn, to_json_string, Database};
 use crate::{
-    app_config::{AppType, McpApps, McpConfig, McpRoot, McpServer, MultiAppConfig},
+    app_config::{
+        AppType, McpAppOverrides, McpApps, McpConfig, McpRoot, McpServer, MultiAppConfig,
+    },
     error::AppError,
 };
 use rusqlite::{params, Connection};
 use std::collections::HashMap;
+
+const APP_OVERRIDES: &str = "mcp_app_overrides_v1";
 
 fn merge_legacy_mcp_servers(
     servers: &mut HashMap<String, McpServer>,
@@ -142,14 +146,35 @@ impl Database {
             );
         }
         root.servers = Some(servers);
+        root.app_overrides = self
+            .load_json_setting_with_conn(conn, APP_OVERRIDES)?
+            .unwrap_or_default();
+        let servers = root.servers.as_ref().expect("servers loaded");
+        root.app_overrides.retain(|id, _| servers.contains_key(id));
         Ok(root)
+    }
+
+    pub(crate) fn update_mcp_app_overrides<R>(
+        &self,
+        update: impl FnOnce(&mut McpRoot) -> Result<R, AppError>,
+    ) -> Result<R, AppError> {
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let mut root = self.load_mcp_root(&tx)?;
+        let result = update(&mut root)?;
+        Self::set_json_setting_tx(&tx, APP_OVERRIDES, &root.app_overrides)?;
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(result)
     }
 
     pub(crate) fn save_mcp_tx(
         tx: &rusqlite::Transaction<'_>,
         config: &MultiAppConfig,
     ) -> Result<(), AppError> {
-        for (id, server) in normalized_mcp_servers(config) {
+        let servers = normalized_mcp_servers(config);
+        for (id, server) in &servers {
             tx.execute(
                 "INSERT OR REPLACE INTO mcp_servers (
                     id, name, server_config, description, homepage, docs, tags,
@@ -170,6 +195,26 @@ impl Database {
                 ],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        // A deleted server's patch must not attach to a future definition
+        // that reuses its ID. Ordinary upserts leave existing patches intact.
+        let raw: Option<String> = {
+            use rusqlite::OptionalExtension;
+            tx.query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [APP_OVERRIDES],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::Database(e.to_string()))?
+        };
+        if let Some(raw) = raw {
+            let mut overrides: McpAppOverrides = from_json_string(&raw, APP_OVERRIDES)?;
+            let previous = overrides.len();
+            overrides.retain(|id, _| servers.contains_key(id));
+            if overrides.len() != previous {
+                Self::set_json_setting_tx(tx, APP_OVERRIDES, &overrides)?;
+            }
         }
         Ok(())
     }

@@ -242,6 +242,7 @@ async fn web_capabilities_and_default_model_write_are_scoped() {
         value["appFeatures"]["opencode"]["configVersions"],
         json!([1, 2])
     );
+    assert_eq!(value["mcpAppOverrideVersion"], 1);
     let before = read(&path);
     for (model, success) in [("native/other", true), ("invalid", false)] {
         let request = Request::builder()
@@ -258,6 +259,120 @@ async fn web_capabilities_and_default_model_write_are_scoped() {
     let mut expected = before;
     expected["model"] = json!("native/other");
     assert_eq!(read(&path), expected);
+}
+
+#[tokio::test]
+async fn same_mcp_id_uses_distinct_cli_patches_and_clears_disabled_opencode() {
+    let _guard = support::test_mutex().lock().unwrap();
+    let (path, state) = setup(NATIVE);
+    let home = support::ensure_test_home();
+    let base = json!({"type":"http","url":"https://example.test/mcp"});
+    let record = serde_json::from_value(json!({
+        "id":"remote", "name":"same MCP", "server":base,
+        "apps":{"codex":true,"opencode":true}
+    }))
+    .unwrap();
+    McpService::upsert_server(&state, record).unwrap();
+    let state = Arc::new(state);
+    std::env::set_var("WEB_CSRF_TOKEN", "synthetic-csrf");
+    let app = web_api::create_router(state.clone(), "synthetic-password".into());
+    let auth = format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode("admin:synthetic-password")
+    );
+    let codex = json!({"oauth":{"client_id":"https://example.test/codex.json"}});
+    let opencode = json!({"oauth":{"client_id":"https://example.test/opencode.json"}});
+    let write = |cli: &str, expected_enabled, previous: Value, patch: Value, csrf| {
+        let mut request = Request::builder()
+            .method(Method::PUT)
+            .uri(format!("/api/v1/mcp/servers/remote/app-overrides/{cli}"))
+            .header("Authorization", &auth)
+            .header("Content-Type", "application/json");
+        if csrf {
+            request = request.header("X-CSRF-Token", "synthetic-csrf");
+        }
+        request
+            .body(Body::from(
+                json!({
+                    "expected_server":base, "expected_enabled":expected_enabled,
+                    "expected_override":previous, "patch":patch
+                })
+                .to_string(),
+            ))
+            .unwrap()
+    };
+    for (cli, patch) in [("codex", codex.clone()), ("opencode", opencode.clone())] {
+        for csrf in [false, true] {
+            let result = app
+                .clone()
+                .oneshot(write(cli, true, Value::Null, patch.clone(), csrf))
+                .await
+                .unwrap();
+            assert_eq!(
+                result.status(),
+                if csrf {
+                    StatusCode::OK
+                } else {
+                    StatusCode::FORBIDDEN
+                }
+            );
+        }
+    }
+    let stale = app
+        .clone()
+        .oneshot(write("opencode", true, Value::Null, Value::Null, true))
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+    let list = Request::builder()
+        .uri("/api/v1/mcp/app-overrides")
+        .header("Authorization", &auth)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(list).await.unwrap();
+    let actual: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(
+        actual,
+        json!({"remote":{"codex":codex,"opencode":opencode}})
+    );
+    assert_eq!(
+        state.load_config().unwrap().mcp.servers.unwrap()["remote"].server,
+        base
+    );
+    // An ordinary config replacement and a full sync retain native overrides.
+    state.replace_config(&state.load_config().unwrap()).unwrap();
+    McpService::sync_all_enabled(&state).unwrap();
+    let codex_config: toml::Value = std::fs::read_to_string(home.join(".codex/config.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        codex_config["mcp_servers"]["remote"]["oauth"]["client_id"].as_str(),
+        Some("https://example.test/codex.json")
+    );
+    let open = read(&path);
+    assert_eq!(
+        open["mcp"]["servers"]["remote"]["oauth"]["client_id"],
+        "https://example.test/opencode.json"
+    );
+    assert_eq!(open["mcp"]["servers"]["remote"]["extension"], "keep");
+    McpService::toggle_app(&state, "remote", AppType::Opencode, false).unwrap();
+    let reset = app
+        .clone()
+        .oneshot(write("opencode", false, opencode, Value::Null, true))
+        .await
+        .unwrap();
+    assert_eq!(reset.status(), StatusCode::OK);
+    let disabled = read(&path);
+    assert_eq!(disabled["mcp"]["servers"]["remote"]["disabled"], true);
+    assert!(disabled["mcp"]["servers"]["remote"].get("oauth").is_none());
+    McpService::toggle_app(&state, "remote", AppType::Opencode, true).unwrap();
+    assert!(read(&path)["mcp"]["servers"]["remote"]
+        .get("oauth")
+        .is_none());
+    McpService::delete_server(&state, "remote").unwrap();
+    assert!(McpService::app_overrides(&state).unwrap().is_empty());
 }
 
 #[tokio::test]

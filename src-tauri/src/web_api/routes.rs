@@ -17,6 +17,11 @@ use super::{
 pub fn create_router(state: SharedState) -> Router {
     Router::new()
         .route("/capabilities", get(capabilities::get_capabilities))
+        .route("/v1/mcp/app-overrides", get(mcp::list_app_overrides))
+        .route(
+            "/v1/mcp/servers/:id/app-overrides/:app",
+            put(mcp::update_app_override),
+        )
         .nest("/v2/opencode", opencode_v2_routes())
         .route("/health/status", get(health::proxy_status))
         .nest("/auth", auth_routes())

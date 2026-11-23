@@ -19,11 +19,14 @@ fn collect_enabled_servers(config: &MultiAppConfig, app: &AppType) -> HashMap<St
         return servers
             .iter()
             .filter(|(_, server)| server.apps.is_enabled_for(app))
-            .filter_map(|(id, server)| match validate_server_spec(&server.server) {
-                Ok(()) => Some((id.clone(), server.server.clone())),
-                Err(err) => {
-                    log::warn!("跳过无效的 MCP 条目 '{id}': {err}");
-                    None
+            .filter_map(|(id, server)| {
+                let spec = config.mcp.server_for_app(server, app);
+                match validate_server_spec(&spec) {
+                    Ok(()) => Some((id.clone(), spec)),
+                    Err(err) => {
+                        log::warn!("跳过无效的 MCP 条目 '{id}': {err}");
+                        None
+                    }
                 }
             })
             .collect();

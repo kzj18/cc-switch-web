@@ -10,7 +10,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app_config::{AppType, McpServer},
+    app_config::{AppType, McpAppOverrides, McpAppPatch, McpServer},
     claude_mcp,
     services::McpService,
     store::AppState,
@@ -32,6 +32,40 @@ pub async fn list_servers(
 ) -> ApiResult<HashMap<String, McpServer>> {
     let servers = McpService::get_all_servers(&state).map_err(internal_error)?;
     Ok(Json(servers))
+}
+
+pub async fn list_app_overrides(State(state): State<Arc<AppState>>) -> ApiResult<McpAppOverrides> {
+    Ok(Json(
+        McpService::app_overrides(&state).map_err(ApiError::from)?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpAppOverrideWrite {
+    expected_server: serde_json::Value,
+    expected_enabled: bool,
+    expected_override: Option<McpAppPatch>,
+    patch: Option<McpAppPatch>,
+}
+
+pub async fn update_app_override(
+    State(state): State<Arc<AppState>>,
+    Path((id, app)): Path<(String, String)>,
+    Json(input): Json<McpAppOverrideWrite>,
+) -> ApiResult<bool> {
+    let app = parse_mcp_app(&app)?;
+    McpService::set_app_override(
+        &state,
+        &id,
+        app,
+        input.expected_server,
+        input.expected_enabled,
+        input.expected_override,
+        input.patch,
+    )
+    .map_err(ApiError::from)?;
+    Ok(Json(true))
 }
 
 pub async fn import_from_apps(
@@ -151,12 +185,8 @@ pub async fn get_config(
         .map_err(internal_error)?
         .to_string_lossy()
         .to_string();
-    let servers = McpService::get_all_servers(&state)
-        .map_err(internal_error)?
-        .into_iter()
-        .filter(|(_, server)| server.apps.is_enabled_for(&app_ty))
-        .map(|(id, server)| (id, server.server))
-        .collect();
+    #[allow(deprecated)]
+    let servers = McpService::get_servers(&state, app_ty).map_err(internal_error)?;
     Ok(Json(McpConfigResponse {
         config_path,
         servers,

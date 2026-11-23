@@ -55,6 +55,19 @@ Basic Auth / CSRF、现有 REST API 和 SQLite Schema v7。开发目录使用 `o
 `ai-config-sync` 只向当前 provider 发布该 provider 的片段和格式元数据；
 `cc-switch-matrix` 保留自己的分组、审阅、幂等和回读逻辑，并按实例能力开放 OpenCode。
 
+### 同一 MCP ID 的 CLI 差异
+
+支持的 Web 实例在 `GET /api/capabilities` 中返回 `mcpAppOverrideVersion: 1`。
+`GET /api/v1/mcp/app-overrides` 返回以 MCP ID、CLI 名称为键的 JSON 合并补丁。
+`PUT /api/v1/mcp/servers/<id>/app-overrides/<app>` 只保存指定 CLI 的差异，
+请求包含 `expected_server`、`expected_enabled`、`expected_override` 和 `patch`。
+前置条件变化时返回 409，写入沿用 Basic Auth 和 CSRF。补丁为 `null` 时清除该 CLI 的差异。
+
+CLI 差异保存在本实例 SQLite 的独立设置中。统一 MCP 读写仍使用原有共享定义和开关，
+删除统一 MCP 时一并清理差异。单项写入、重新启用和全量同步会先应用该 CLI 的补丁。
+OpenCode 使用其原生配置格式，并在移除差异时清理此前由补丁管理的字段。旧版客户端
+和现有统一定义 API 继续使用原有负载。Matrix 负责跨机补丁、各机字段保护和一致性核对。
+
 ## MCP 全量同步的数据源
 
 SQLite 读回的统一 `mcp.servers` 和每个服务器的 `apps` 开关是全量投影的数据源，
@@ -77,6 +90,9 @@ Laliet Web 线采用 `v0.x`；Toolbox 会比较“按时间最新”与“语义
 交付顺序为：隔离测试、构建 Web、提交并建立稳定 tag、发布 fork 提交/tag、更新 Toolbox
 子模块 URL 和 gitlink。远端发布与实际运行服务切换分别处理，不能将子模块更新当成已经部署。
 保留原服务的认证、数据库、客户端配置与 updater 输出目录；不直接让测试服务使用真实 HOME。
+
+维护仓库的版本标签触发 GitHub Actions 的 Linux x86_64 Web 发布任务。任务在 Ubuntu 20.04
+用户空间构建静态资源和服务，并发布二进制及 SHA-256 文件。上游桌面签名发布任务在其原有仓库使用。
 
 ## 验证
 

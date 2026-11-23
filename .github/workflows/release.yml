@@ -13,7 +13,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  maintained-web-release:
+    name: Maintained Linux Web release
+    if: github.repository == 'kzj18/cc-switch-web'
+    runs-on: ubuntu-22.04
+    container: ubuntu:20.04
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            binutils build-essential ca-certificates curl git liblzma-dev libssl-dev pkg-config
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: maintained-web-ubuntu-20.04
+
+      - name: Build Web assets
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:web
+
+      - name: Validate Web server
+        working-directory: src-tauri
+        run: |
+          cargo test --locked --no-default-features --features web-server \
+            --test opencode_v2 --test mcp_unified_sync --test web_provider_mcp_sync \
+            -- --test-threads=1
+
+      - name: Build and checksum Web server
+        working-directory: src-tauri
+        run: |
+          cargo build --locked --release --no-default-features --features web-server --example server
+          mkdir -p ../release-assets
+          install -m 0755 target/release/examples/server ../release-assets/cc-switch-server-linux-x86_64
+          cd ../release-assets
+          sha256sum cc-switch-server-linux-x86_64 > cc-switch-server-linux-x86_64.sha256
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          body_path: docs/release-note-${{ github.ref_name }}-zh.md
+          files: release-assets/*
+          fail_on_unmatched_files: true
+
   release:
+    if: github.repository != 'kzj18/cc-switch-web'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
