@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
@@ -15,7 +16,7 @@ concurrency:
 jobs:
   maintained-web-release:
     name: Maintained Linux Web release
-    if: github.repository == 'kzj18/cc-switch-web'
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'kzj18/cc-switch-web'
     runs-on: ubuntu-22.04
     container: ubuntu:20.04
     steps:
@@ -69,7 +70,7 @@ jobs:
           fail_on_unmatched_files: true
 
   release:
-    if: github.repository != 'kzj18/cc-switch-web'
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository != 'kzj18/cc-switch-web'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
